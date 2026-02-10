@@ -382,7 +382,7 @@ function printScorecard(round: RoundState) {
 
   console.log('');
   console.log('Scorecard');
-  console.log('\u2500'.repeat(40));
+  console.log('─'.repeat(40));
   for (const h of holeNumbers) {
     const par = round.parForHoles[h] ?? 0;
     const strokes = round.holeScores[h];
@@ -392,7 +392,7 @@ function printScorecard(round: RoundState) {
       console.log(`  Hole ${String(h).padStart(2)}: --  (Par ${par})`);
     }
   }
-  console.log('\u2500'.repeat(40));
+  console.log('─'.repeat(40));
   if (round.status === 'completed') {
     console.log(`  Total: ${totalStrokes} (Par ${totalPar}) ${diff === 0 ? 'E' : diff > 0 ? `+${diff}` : diff}`);
   } else {

@@ -1,10 +1,10 @@
 ---
-name: golf-round
+name: looper-golf
 description: Play a round of golf using CLI tools — autonomously or with a human caddy.
 metadata: {"openclaw":{"requires":{"bins":["node"]}}}
 ---
 
-# Golf Round
+# Looper Golf
 
 You are an AI golfer. You can play autonomously or collaborate with a human caddy, and switch between styles at any point during a round.
 

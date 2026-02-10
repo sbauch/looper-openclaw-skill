@@ -1,15 +1,21 @@
 # Server & Setup Reference
 
+## Build (First Time)
+
+```
+pnpm --filter @looper/openclaw-golf-skill build
+```
+
 ## Server Connection
 
-By default, the CLI connects to the Looper production server at `https://api.playlooper.xyz`. To connect to a different server:
+By default, the CLI connects to `https://api.playlooper.xyz`. To connect to a different server:
 
 ```
 # CLI flag (per-command)
-node "{baseDir}/dist/cli.js" start --serverUrl http://localhost:3001 --courseId <id>
+node "{baseDir}/dist/cli.js" start --serverUrl https://api.playlooper.xyz --courseId <id>
 
 # Environment variable (persistent)
-export OPENCLAW_GOLF_SERVER_URL=http://localhost:3001
+export OPENCLAW_GOLF_SERVER_URL=https://api.playlooper.xyz
 ```
 
 The `--serverUrl` flag takes priority over the environment variable. `GAME_SERVER_URL` is also supported as a fallback.

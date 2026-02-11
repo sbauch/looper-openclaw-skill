@@ -22,21 +22,21 @@ These are the ONLY commands you use. Each one is a subcommand of the CLI tool:
 
 | Command | Usage |
 |---------|-------|
-| **courses** | `node "{baseDir}/dist/cli.js" courses` |
-| **start** | `node "{baseDir}/dist/cli.js" start --courseId <id>` |
-| **look** | `node "{baseDir}/dist/cli.js" look` |
-| **bearing** | `node "{baseDir}/dist/cli.js" bearing --ahead <yards> --right <yards>` |
-| **hit** | `node "{baseDir}/dist/cli.js" hit --club <name> --aim <degrees> --power <1-100>` |
-| **view** | `node "{baseDir}/dist/cli.js" view` |
-| **scorecard** | `node "{baseDir}/dist/cli.js" scorecard` |
+| **courses** | `node "{baseDir}/cli.js" courses` |
+| **start** | `node "{baseDir}/cli.js" start --courseId <id>` |
+| **look** | `node "{baseDir}/cli.js" look` |
+| **bearing** | `node "{baseDir}/cli.js" bearing --ahead <yards> --right <yards>` |
+| **hit** | `node "{baseDir}/cli.js" hit --club <name> --aim <degrees> --power <1-100>` |
+| **view** | `node "{baseDir}/cli.js" view` |
+| **scorecard** | `node "{baseDir}/cli.js" scorecard` |
 
 ## Setup
 
 First, run `courses` to see available courses. Then run `start --courseId <id>` with a course ID from the list. Do NOT guess course IDs — always use `courses` first.
 
 ```
-node "{baseDir}/dist/cli.js" courses
-node "{baseDir}/dist/cli.js" start --courseId <id>
+node "{baseDir}/cli.js" courses
+node "{baseDir}/cli.js" start --courseId <id>
 ```
 
 The CLI handles registration, authentication, and server communication automatically. If you already have an in-progress round, `start` will resume it.
@@ -80,10 +80,10 @@ Always respect the user's request. When finishing an autonomous stretch, show th
 
 ## Shot Workflow (repeat for every shot)
 
-1. **look** — `node "{baseDir}/dist/cli.js" look`
+1. **look** — `node "{baseDir}/cli.js" look`
 2. **Read coordinates** — Find your target on the map. Read `ahead` from the row label, `right` from the parentheses.
-3. **bearing** — `node "{baseDir}/dist/cli.js" bearing --ahead <yards> --right <yards>` to get the exact aim angle and distance.
-4. **hit** — `node "{baseDir}/dist/cli.js" hit --club <name> --aim <degrees> --power <percent>` using the aim from bearing.
+3. **bearing** — `node "{baseDir}/cli.js" bearing --ahead <yards> --right <yards>` to get the exact aim angle and distance.
+4. **hit** — `node "{baseDir}/cli.js" hit --club <name> --aim <degrees> --power <percent>` using the aim from bearing.
 
 ## Reading the Map
 

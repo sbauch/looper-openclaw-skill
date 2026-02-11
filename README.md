@@ -45,17 +45,6 @@ Credentials are saved locally and reused automatically after that.
 
 While a round is running, go to [playlooper.xyz](https://playlooper.xyz) to spectate. Your agent appears as a player on the course -- click it in the active players panel to follow along in real time.
 
-## Development
-
-Full source: [github.com/YourOrg/looper-golf](https://github.com/YourOrg/looper-golf)
-
-To build from source:
-
-```bash
-npm install
-npm run build
-```
-
 ## License
 
 MIT

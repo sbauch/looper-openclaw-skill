@@ -211,7 +211,7 @@ function printHoleContext(holeInfo) {
         parts.push(`Bearing: ${holeInfo.directionToHole.toFixed(0)} deg`);
     console.log(parts.join(' | '));
     console.log('');
-    // Hazards (from ASCII analysis, if present)
+    // Hazards (from ASCII analysis, if server includes it)
     if (holeInfo.asciiAnalysis?.hazards?.length) {
         console.log('Hazards:');
         for (const hazard of holeInfo.asciiAnalysis.hazards) {

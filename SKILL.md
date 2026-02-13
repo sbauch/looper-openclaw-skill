@@ -142,10 +142,36 @@ The `look` output includes your stock yardages at full power. Distance scales li
 - 180 = backward
 - 270 = left
 
+## Wind
+
+The `look` output includes a **Wind** line describing the current conditions, e.g.:
+
+```
+Wind: 10 mph from NW (headwind-left)
+```
+
+Wind affects every full shot. Putts are immune.
+
+### How wind affects shots
+
+- **Headwind** reduces carry distance. A 10 mph headwind on a 200y shot loses ~6 yards.
+- **Tailwind** adds carry distance. Same shot gains ~6 yards downwind.
+- **Crosswind** pushes the ball sideways. A 10 mph crosswind drifts a 200y shot ~10 yards.
+- Longer shots are affected more. A driver in wind drifts much further than a wedge.
+
+### Adjusting for wind
+
+- **Headwind**: Club up (e.g., 5-iron instead of 6-iron) or increase power.
+- **Tailwind**: Club down or reduce power to avoid overshooting.
+- **Crosswind**: Aim upwind of your target. If the wind pushes right, aim left. Use `bearing` to get aim to an offset target.
+- **Strong wind (12+ mph)**: Favor lower-lofted clubs that keep the ball down. Consider laying up rather than attacking a pin near hazards.
+- **Calm (<3 mph)**: Wind is negligible — play normally.
+
 ## Strategy Tips
 
 - Off the tee: Aim at the widest part of the fairway, not always the flag.
 - Doglegs: Aim at the bend, not the green.
 - Lay up short of water/bunkers rather than trying to carry them.
 - Putting: Use putter at low power. Read distance carefully.
+- Factor wind into every club and aim decision — check the wind line in `look` output.
 - A bogey beats a double. Play safe when unsure.

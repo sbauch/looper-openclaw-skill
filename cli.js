@@ -160,6 +160,9 @@ class GolfApiClient {
     async getHoleImage(courseId, roundId) {
         return this.authorizedFetch(`${this.serverUrl}/api/course/${courseId}/rounds/${roundId}/hole-image`);
     }
+    async generateCaddyCode() {
+        return this.authorizedFetch(`${this.serverUrl}/api/agents/${this.agentId}/caddy-code`, { method: 'POST' });
+    }
 }
 async function registerAgent(serverUrl, registrationKey, name) {
     return requestJson(`${serverUrl}/api/agents/register`, {
@@ -210,6 +213,10 @@ function printHoleContext(holeInfo) {
     if (holeInfo.directionToHole != null)
         parts.push(`Bearing: ${holeInfo.directionToHole.toFixed(0)} deg`);
     console.log(parts.join(' | '));
+    // Wind conditions
+    if (holeInfo.wind) {
+        console.log(`Wind: ${holeInfo.wind.description}`);
+    }
     console.log('');
     // Hazards (from ASCII analysis, if server includes it)
     if (holeInfo.asciiAnalysis?.hazards?.length) {
@@ -427,6 +434,14 @@ async function cmdScorecard(api, agentState) {
     const { round } = await api.resumeRound(agentState.courseId, agentState.roundId);
     printScorecard(round);
 }
+async function cmdCaddyCode(api) {
+    const { code, expiresAt } = await api.generateCaddyCode();
+    console.log('');
+    console.log(`Caddy claim code: ${code}`);
+    console.log(`Expires: ${new Date(expiresAt).toLocaleTimeString()}`);
+    console.log('');
+    console.log('Give this code to your caddy. They can enter it on the website to link their wallet to your agent.');
+}
 // ─── Bearing calculator (local math, no API) ─────────────────────────────
 function cmdBearing(options) {
     const aheadRaw = getOption(options, 'ahead');
@@ -466,6 +481,7 @@ async function main() {
         console.log('  bearing     Calculate aim angle: --ahead <yards> --right <yards>');
         console.log('  view        Get a PNG image URL of the current hole');
         console.log('  scorecard   View the current round scorecard');
+        console.log('  caddy-code  Generate a code to link a caddy wallet');
         console.log('');
         console.log('Options:');
         console.log('  --courseId <id>         Course to play (or auto-select)');
@@ -480,7 +496,7 @@ async function main() {
         console.log('  --apiKey <key>          API key override');
         process.exit(0);
     }
-    const validCommands = ['courses', 'start', 'look', 'hit', 'view', 'scorecard', 'bearing'];
+    const validCommands = ['courses', 'start', 'look', 'hit', 'view', 'scorecard', 'bearing', 'caddy-code'];
     if (!validCommands.includes(command)) {
         console.error(`Unknown command: ${command}. Use one of: ${validCommands.join(', ')}`);
         process.exit(1);
@@ -566,6 +582,9 @@ async function main() {
             break;
         case 'scorecard':
             await cmdScorecard(api, agentState);
+            break;
+        case 'caddy-code':
+            await cmdCaddyCode(api);
             break;
     }
 }

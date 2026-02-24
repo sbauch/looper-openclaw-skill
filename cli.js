@@ -129,8 +129,8 @@ class GolfApiClient {
     async listCourses() {
         return this.authorizedFetch(`${this.serverUrl}/api/courses`);
     }
-    async getOnchainConfig(courseId) {
-        const qs = courseId ? `?courseId=${encodeURIComponent(courseId)}` : '';
+    async getOnchainConfig(playerCourseId) {
+        const qs = playerCourseId ? `?courseId=${encodeURIComponent(playerCourseId)}` : '';
         return this.authorizedFetch(`${this.serverUrl}/api/agents/${this.agentId}/onchain-config${qs}`);
     }
     async listRounds(courseId) {
@@ -332,6 +332,21 @@ async function cmdCourses(api) {
     }
     console.log(`Use: start --courseId <id> to begin a round.`);
 }
+async function cmdGolfers(api) {
+    const config = await api.getOnchainConfig();
+    if (!config.courses.length) {
+        console.log('No golfers found. The wallet linked to this agent does not own any courses.');
+        return;
+    }
+    console.log('Your golfers:');
+    console.log('');
+    for (const c of config.courses) {
+        const marker = c.id === config.playerCourseId ? ' (default)' : '';
+        console.log(`  Course ${c.id}: ${c.golferName || '(unnamed)'}${marker}`);
+    }
+    console.log('');
+    console.log('Use --playerCourseId <id> with start or prepare-round to play as a specific golfer.');
+}
 async function cmdStart(api, agentState, statePath, options) {
     const teeColor = getOption(options, 'teeColor') || agentState.teeColor || 'white';
     let courseId = getOption(options, 'courseId') || agentState.courseId || '';
@@ -498,17 +513,16 @@ function encodeExecute(to, value, innerCalldata, operation) {
         hexPadUint256(BigInt(dataByteLen)) + // data length
         dataPadded; // data bytes
 }
-async function cmdPrepareRound(api, agentState, options) {
+async function cmdPrepareRound(api, options) {
     const hostCourseId = getOption(options, 'courseId');
     if (!hostCourseId) {
         throw new Error('Missing --courseId (the course you want to play on).');
     }
-    // Which golfer to play as (defaults to stored courseId)
-    const playerCourseArg = getOption(options, 'playerCourseId') || agentState.courseId;
-    // Fetch on-chain config from server
+    const playerCourseArg = getOption(options, 'playerCourseId') || undefined;
+    // Fetch on-chain config from server, selecting the requested golfer
     const config = await api.getOnchainConfig(playerCourseArg);
     if (!config.tbaAddress) {
-        throw new Error('Your course does not have a TBA address yet. The course NFT must be minted first.');
+        throw new Error('Your golfer does not have a TBA address yet. The course NFT must be minted first.');
     }
     if (!config.gameContract) {
         throw new Error('GameContract address not available. The server may not have contract deployments configured.');
@@ -520,10 +534,13 @@ async function cmdPrepareRound(api, agentState, options) {
     const startRoundCalldata = encodeStartRound(playerCourseId, hostId, mode);
     // Encode the outer execute calldata (TBA → GameContract)
     const executeCalldata = encodeExecute(config.gameContract, 0n, startRoundCalldata, 0n);
+    // Show which golfer was selected
+    const golfer = config.courses.find(c => c.id === config.playerCourseId);
+    const golferLabel = golfer?.golferName || `Course ${config.playerCourseId}`;
     console.log('');
     console.log('On-chain transaction to start a round:');
     console.log('');
-    console.log(`  Player Course ID: ${config.playerCourseId}`);
+    console.log(`  Golfer:           ${golferLabel} (course ${config.playerCourseId})`);
     console.log(`  Host Course ID:   ${hostCourseId}`);
     console.log(`  Mode:             2 (agent play)`);
     console.log(`  Chain ID:         ${config.chainId}`);
@@ -594,8 +611,9 @@ async function main() {
         console.log('');
         console.log('Commands:');
         console.log('  register       Register with an invite code: --inviteCode <code>');
-        console.log('  courses        List available courses');
-        console.log('  prepare-round  Generate on-chain transaction to start a round: --courseId <id>');
+        console.log('  golfers        List golfers (courses) this agent can control');
+        console.log('  courses        List available courses to play on');
+        console.log('  prepare-round  Generate on-chain transaction to start a round');
         console.log('  start          Resume an on-chain round: --courseId <id>');
         console.log('  look           See the current hole (ASCII map, yardages, hazards)');
         console.log('  hit            Execute a shot: --club <name> --aim <deg> --power <1-100>');
@@ -604,17 +622,18 @@ async function main() {
         console.log('  scorecard      View the current round scorecard');
         console.log('');
         console.log('Options:');
-        console.log('  --courseId <id>         Course to play');
-        console.log('  --teeColor <color>      Tee color (default: white)');
-        console.log('  --yardsPerCell <2-20>   Map resolution (default: 5, persisted)');
-        console.log('  --mapFormat <format>    Map format: grid (default) or ascii');
-        console.log('  --inviteCode <code>     Invite code from course owner (register only)');
+        console.log('  --courseId <id>           Host course to play on');
+        console.log('  --playerCourseId <id>     Which golfer to play as (see: golfers)');
+        console.log('  --teeColor <color>        Tee color (default: white)');
+        console.log('  --yardsPerCell <2-20>     Map resolution (default: 5, persisted)');
+        console.log('  --mapFormat <format>      Map format: grid (default) or ascii');
+        console.log('  --inviteCode <code>       Invite code from course owner (register only)');
         console.log('');
         console.log('Get an invite code from a course owner, register, then they start');
         console.log('your round via the web app or you start it via your CourseTBA.');
         process.exit(0);
     }
-    const validCommands = ['register', 'courses', 'prepare-round', 'start', 'look', 'hit', 'view', 'scorecard', 'bearing'];
+    const validCommands = ['register', 'golfers', 'courses', 'prepare-round', 'start', 'look', 'hit', 'view', 'scorecard', 'bearing'];
     if (!validCommands.includes(command)) {
         console.error(`Unknown command: ${command}. Use one of: ${validCommands.join(', ')}`);
         process.exit(1);
@@ -636,7 +655,7 @@ async function main() {
     const agentState = await readAgentState(statePath);
     if (!agentState) {
         throw new Error('No agent credentials found. Register first:\n\n' +
-            '  register --registrationKey <key> --name "Agent Name"');
+            '  register --inviteCode <code>');
     }
     const serverUrl = SERVER_URL;
     // Parse --yardsPerCell and persist if provided
@@ -661,11 +680,14 @@ async function main() {
     }
     const api = new GolfApiClient(serverUrl, agentState.agentId, agentState.apiKey);
     switch (command) {
+        case 'golfers':
+            await cmdGolfers(api);
+            break;
         case 'courses':
             await cmdCourses(api);
             break;
         case 'prepare-round':
-            await cmdPrepareRound(api, agentState, options);
+            await cmdPrepareRound(api, options);
             break;
         case 'start':
             await cmdStart(api, agentState, statePath, options);

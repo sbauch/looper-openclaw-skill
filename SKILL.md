@@ -23,6 +23,7 @@ These are the ONLY commands you use. Each one is a subcommand of the CLI tool:
 | Command | Usage |
 |---------|-------|
 | **register** | `node "{baseDir}/cli.js" register --inviteCode <code>` |
+| **golfers** | `node "{baseDir}/cli.js" golfers` |
 | **courses** | `node "{baseDir}/cli.js" courses` |
 | **start** | `node "{baseDir}/cli.js" start --courseId <id>` |
 | **look** | `node "{baseDir}/cli.js" look` |
@@ -30,7 +31,7 @@ These are the ONLY commands you use. Each one is a subcommand of the CLI tool:
 | **hit** | `node "{baseDir}/cli.js" hit --club <name> --aim <degrees> --power <1-100>` |
 | **view** | `node "{baseDir}/cli.js" view` |
 | **scorecard** | `node "{baseDir}/cli.js" scorecard` |
-| **prepare-round** | `node "{baseDir}/cli.js" prepare-round --courseId <id>` |
+| **prepare-round** | `node "{baseDir}/cli.js" prepare-round --courseId <id> [--playerCourseId <id>]` |
 
 ## Setup
 
@@ -46,7 +47,7 @@ Ask the course owner to generate an invite code from the web app. They click "Ge
 node "{baseDir}/cli.js" register --inviteCode <code>
 ```
 
-This creates API credentials for your agent and binds them to the owner's course. Your golfer's name and skills come from the course — the agent is just an external interface for playing rounds.
+This creates API credentials and binds them to the course owner's wallet. Your golfer's name and skills come from the course — the agent is just an external interface for playing rounds.
 
 ### Step 3: Start a round (on-chain)
 
@@ -80,6 +81,39 @@ node "{baseDir}/cli.js" start --courseId <id>
 The `start` command finds your active round on the course and resumes it. If no round exists, it will tell you.
 
 Start options: `--teeColor <color>`, `--yardsPerCell <2-20>`, `--mapFormat <grid|ascii>`.
+
+## Golfer Context
+
+Your agent credentials are bound to a wallet, not a single golfer. If the wallet owns multiple courses, you control multiple golfers — each with their own name, skills, and handicap.
+
+### Discovering your golfers
+
+```
+node "{baseDir}/cli.js" golfers
+```
+
+This lists all golfers (courses) your agent can play as, showing course ID, golfer name, and which is the default.
+
+### Selecting a golfer
+
+When starting a round on-chain with `prepare-round`, use `--playerCourseId` to choose which golfer plays:
+
+```
+node "{baseDir}/cli.js" prepare-round --courseId <hostCourse> --playerCourseId <yourGolfer>
+```
+
+If omitted, the server picks the first course owned by the wallet.
+
+When the course owner starts the round from the web app (Option A), they choose which golfer plays via the UI — no CLI flag needed.
+
+### Multi-golfer agents
+
+If you control multiple golfers and want to play simultaneous rounds, spawn a subagent per golfer. Each subagent should:
+1. Run `golfers` to discover available identities
+2. Use a specific `--playerCourseId` when preparing rounds
+3. Track its own `--courseId` / round context independently
+
+This mirrors the web app's golfer switcher — same wallet, different in-game identities.
 
 ## Play Modes
 

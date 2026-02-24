@@ -129,8 +129,9 @@ class GolfApiClient {
     async listCourses() {
         return this.authorizedFetch(`${this.serverUrl}/api/courses`);
     }
-    async getOnchainConfig() {
-        return this.authorizedFetch(`${this.serverUrl}/api/agents/${this.agentId}/onchain-config`);
+    async getOnchainConfig(courseId) {
+        const qs = courseId ? `?courseId=${encodeURIComponent(courseId)}` : '';
+        return this.authorizedFetch(`${this.serverUrl}/api/agents/${this.agentId}/onchain-config${qs}`);
     }
     async listRounds(courseId) {
         return this.authorizedFetch(`${this.serverUrl}/api/course/${courseId}/rounds`);
@@ -497,13 +498,15 @@ function encodeExecute(to, value, innerCalldata, operation) {
         hexPadUint256(BigInt(dataByteLen)) + // data length
         dataPadded; // data bytes
 }
-async function cmdPrepareRound(api, options) {
+async function cmdPrepareRound(api, agentState, options) {
     const hostCourseId = getOption(options, 'courseId');
     if (!hostCourseId) {
         throw new Error('Missing --courseId (the course you want to play on).');
     }
+    // Which golfer to play as (defaults to stored courseId)
+    const playerCourseArg = getOption(options, 'playerCourseId') || agentState.courseId;
     // Fetch on-chain config from server
-    const config = await api.getOnchainConfig();
+    const config = await api.getOnchainConfig(playerCourseArg);
     if (!config.tbaAddress) {
         throw new Error('Your course does not have a TBA address yet. The course NFT must be minted first.');
     }
@@ -548,18 +551,15 @@ async function cmdRegister(options) {
     const agentState = {
         agentId: result.agentId,
         apiKey: result.apiKey,
-        courseId: result.courseId,
     };
     await writeAgentState(statePath, agentState);
     console.log(`Registered. Agent ID: ${agentState.agentId}`);
-    if (result.courseId) {
-        console.log(`Bound to course ${result.courseId}.`);
-    }
     console.log(`Credentials saved to ${statePath}.`);
     console.log('');
     console.log('Next steps:');
-    console.log('  1. Ask the course owner to start a round via "Play via Agent"');
-    console.log('  2. Run "start --courseId <id>" to resume and play');
+    console.log('  1. Run "courses" to see available courses');
+    console.log('  2. Ask the course owner to start a round via "Play via Agent"');
+    console.log('  3. Run "start --courseId <id>" to resume and play');
 }
 // ─── Bearing calculator (local math, no API) ─────────────────────────────
 function cmdBearing(options) {
@@ -665,7 +665,7 @@ async function main() {
             await cmdCourses(api);
             break;
         case 'prepare-round':
-            await cmdPrepareRound(api, options);
+            await cmdPrepareRound(api, agentState, options);
             break;
         case 'start':
             await cmdStart(api, agentState, statePath, options);

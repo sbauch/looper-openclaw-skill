@@ -47,16 +47,19 @@ function getNumberOption(options, key, fallback) {
     const parsed = Number(value);
     return Number.isNaN(parsed) ? fallback : parsed;
 }
+// ─── Constants ────────────────────────────────────────────────────────────────
+const SERVER_URL = 'https://api.playlooper.xyz';
 // ─── Agent state persistence ─────────────────────────────────────────────────
-function resolveStatePath(options) {
-    const provided = getOption(options, 'statePath');
-    if (provided)
-        return provided;
-    const envPath = process.env.OPENCLAW_GOLF_STATE_PATH;
-    if (envPath)
-        return envPath;
+/** State file is always {baseDir}/agent.json — no user-controlled path overrides. */
+function resolveStatePath() {
     const baseDir = process.env.OPENCLAW_GOLF_BASE_DIR || process.cwd();
-    return path.join(baseDir, 'agent.json');
+    const resolved = path.resolve(baseDir, 'agent.json');
+    // Guard against path traversal via a crafted OPENCLAW_GOLF_BASE_DIR
+    const resolvedBase = path.resolve(baseDir);
+    if (!resolved.startsWith(resolvedBase + path.sep) && resolved !== path.join(resolvedBase, 'agent.json')) {
+        throw new Error('Invalid state path — resolved outside base directory.');
+    }
+    return resolved;
 }
 async function readAgentState(statePath) {
     try {
@@ -159,18 +162,12 @@ class GolfApiClient {
     async getHoleImage(courseId, roundId) {
         return this.authorizedFetch(`${this.serverUrl}/api/course/${courseId}/rounds/${roundId}/hole-image`);
     }
-    async generateCaddyCode() {
-        return this.authorizedFetch(`${this.serverUrl}/api/agents/${this.agentId}/caddy-code`, { method: 'POST' });
-    }
 }
-async function registerAgent(serverUrl, registrationKey, name) {
+async function registerAgent(serverUrl, inviteCode, name) {
     return requestJson(`${serverUrl}/api/agents/register`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-registration-key': registrationKey,
-        },
-        body: JSON.stringify({ registrationKey, ...(name ? { name } : {}) }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteCode, ...(name ? { name } : {}) }),
     });
 }
 // ─── Display helpers ─────────────────────────────────────────────────────────
@@ -347,9 +344,7 @@ async function cmdStart(api, agentState, statePath, options) {
         throw new Error('No active round found on this course.\n\n' +
             'Rounds must be started on-chain before you can play. Two options:\n\n' +
             '  1. Agent Play (web app):\n' +
-            '     Run "caddy-code" to generate a claim code.\n' +
-            '     Give it to your course owner to claim you in the web app.\n' +
-            '     Owner clicks "Play via Agent" to start a round on-chain.\n' +
+            '     Ask the course owner to start a round via "Play via Agent".\n' +
             '     Then run "start --courseId <id>" again.\n\n' +
             '  2. On-chain via TBA signer:\n' +
             '     If your wallet is an approved signer on the course TBA,\n' +
@@ -468,14 +463,6 @@ async function cmdScorecard(api, agentState) {
     const { round } = await api.resumeRound(agentState.courseId, agentState.roundId);
     printScorecard(round);
 }
-async function cmdCaddyCode(api) {
-    const { code, expiresAt } = await api.generateCaddyCode();
-    console.log('');
-    console.log(`Caddy claim code: ${code}`);
-    console.log(`Expires: ${new Date(expiresAt).toLocaleTimeString()}`);
-    console.log('');
-    console.log('Give this code to your caddy. They can enter it on the website to link their wallet to your agent.');
-}
 // ─── ABI encoding helpers (no dependencies) ──────────────────────────────
 // Hardcoded function selectors (keccak256 of signature, first 4 bytes)
 const START_ROUND_SELECTOR = '66e76b80'; // startRound(uint256,uint256,uint8)
@@ -551,34 +538,31 @@ async function cmdPrepareRound(api, options) {
 }
 // ─── Registration ─────────────────────────────────────────────────────────
 async function cmdRegister(options) {
-    const serverUrl = getOption(options, 'serverUrl')
-        || process.env.OPENCLAW_GOLF_SERVER_URL
-        || process.env.GAME_SERVER_URL
-        || 'https://api.playlooper.xyz';
-    const registrationKey = getOption(options, 'registrationKey')
-        || process.env.OPENCLAW_GOLF_REGISTRATION_KEY;
-    if (!registrationKey) {
-        throw new Error('Missing --registrationKey (or OPENCLAW_GOLF_REGISTRATION_KEY env var).');
+    const inviteCode = getOption(options, 'inviteCode')
+        || process.env.OPENCLAW_GOLF_INVITE_CODE;
+    if (!inviteCode) {
+        throw new Error('Missing --inviteCode (or OPENCLAW_GOLF_INVITE_CODE env var). Get one from the course owner.');
     }
     const agentNameRaw = getOption(options, 'name');
     const agentName = typeof agentNameRaw === 'string' ? agentNameRaw : undefined;
-    const result = await registerAgent(serverUrl, registrationKey, agentName);
-    const statePath = resolveStatePath(options);
+    const result = await registerAgent(SERVER_URL, inviteCode, agentName);
+    const statePath = resolveStatePath();
     const agentState = {
         agentId: result.agentId,
         apiKey: result.apiKey,
         name: result.name || agentName,
-        serverUrl,
+        courseId: result.courseId,
     };
     await writeAgentState(statePath, agentState);
     console.log(`Registered agent ${agentState.agentId}${agentState.name ? ` (${agentState.name})` : ''}.`);
+    if (result.courseId) {
+        console.log(`Bound to course ${result.courseId}.`);
+    }
     console.log(`Credentials saved to ${statePath}.`);
     console.log('');
     console.log('Next steps:');
-    console.log('  1. Run "caddy-code" to generate a claim code');
-    console.log('  2. Give the code to your course owner to link your agent in the web app');
-    console.log('  3. Owner starts a round via "Play via Agent" on-chain');
-    console.log('  4. Run "start --courseId <id>" to resume and play');
+    console.log('  1. Ask the course owner to start a round via "Play via Agent"');
+    console.log('  2. Run "start --courseId <id>" to resume and play');
 }
 // ─── Bearing calculator (local math, no API) ─────────────────────────────
 function cmdBearing(options) {
@@ -612,7 +596,7 @@ async function main() {
         console.log('OpenClaw Golf CLI — You are the golfer. Your caddy is here to help.');
         console.log('');
         console.log('Commands:');
-        console.log('  register       Register a new agent: --registrationKey <key> [--name <name>]');
+        console.log('  register       Register with an invite code: --inviteCode <code> [--name <name>]');
         console.log('  courses        List available courses');
         console.log('  prepare-round  Generate on-chain transaction to start a round: --courseId <id>');
         console.log('  start          Resume an on-chain round: --courseId <id>');
@@ -621,26 +605,20 @@ async function main() {
         console.log('  bearing        Calculate aim angle: --ahead <yards> --right <yards>');
         console.log('  view           Get a PNG image URL of the current hole');
         console.log('  scorecard      View the current round scorecard');
-        console.log('  caddy-code     Generate a code to link your agent to a course owner');
         console.log('');
         console.log('Options:');
         console.log('  --courseId <id>         Course to play');
         console.log('  --teeColor <color>      Tee color (default: white)');
         console.log('  --yardsPerCell <2-20>   Map resolution (default: 5, persisted)');
         console.log('  --mapFormat <format>    Map format: grid (default) or ascii');
-        console.log('  --serverUrl <url>       Game server URL');
-        console.log('  --registrationKey <key> Agent registration key (register command only)');
-        console.log('  --name <name>           Agent display name, max 32 chars (register command only)');
-        console.log('  --statePath <path>      Path to agent state file');
-        console.log('  --agentId <id>          Agent ID override');
-        console.log('  --apiKey <key>          API key override');
+        console.log('  --inviteCode <code>     Invite code from course owner (register only)');
+        console.log('  --name <name>           Agent display name, max 32 chars (register only)');
         console.log('');
-        console.log('Rounds must be started on-chain. Use "caddy-code" to link to a course');
-        console.log('owner, then they start your round via the web app or you start it via');
-        console.log('your CourseTBA if your wallet is an approved signer.');
+        console.log('Get an invite code from a course owner, register, then they start');
+        console.log('your round via the web app or you start it via your CourseTBA.');
         process.exit(0);
     }
-    const validCommands = ['register', 'courses', 'prepare-round', 'start', 'look', 'hit', 'view', 'scorecard', 'bearing', 'caddy-code'];
+    const validCommands = ['register', 'courses', 'prepare-round', 'start', 'look', 'hit', 'view', 'scorecard', 'bearing'];
     if (!validCommands.includes(command)) {
         console.error(`Unknown command: ${command}. Use one of: ${validCommands.join(', ')}`);
         process.exit(1);
@@ -655,35 +633,16 @@ async function main() {
         await cmdRegister(options);
         return;
     }
-    // Resolve agent credentials — load state first so we can use saved serverUrl
-    const explicitAgentId = getOption(options, 'agentId') || process.env.OPENCLAW_GOLF_AGENT_ID;
-    const explicitApiKey = getOption(options, 'apiKey') || process.env.OPENCLAW_GOLF_API_KEY;
-    const statePath = resolveStatePath(options);
-    let agentState = null;
-    if (explicitAgentId && explicitApiKey) {
-        agentState = await readAgentState(statePath) || { agentId: explicitAgentId, apiKey: explicitApiKey };
-        agentState.agentId = explicitAgentId;
-        agentState.apiKey = explicitApiKey;
-    }
-    else {
-        agentState = await readAgentState(statePath);
-    }
-    // Server URL priority: --serverUrl flag > env var > saved state > production default
-    const serverUrl = getOption(options, 'serverUrl')
-        || process.env.OPENCLAW_GOLF_SERVER_URL
-        || process.env.GAME_SERVER_URL
-        || agentState?.serverUrl
-        || 'https://api.playlooper.xyz';
+    // Credentials come exclusively from the state file — no CLI/env overrides.
+    // This prevents a compromised environment from injecting credentials or
+    // redirecting the agent to a malicious server post-registration.
+    const statePath = resolveStatePath();
+    const agentState = await readAgentState(statePath);
     if (!agentState) {
         throw new Error('No agent credentials found. Register first:\n\n' +
-            '  register --registrationKey <key> --name "Agent Name"\n\n' +
-            'Or provide --agentId and --apiKey directly.');
+            '  register --registrationKey <key> --name "Agent Name"');
     }
-    // Persist serverUrl if explicitly provided (flag or env) and different from saved
-    if (agentState.serverUrl !== serverUrl) {
-        agentState.serverUrl = serverUrl;
-        await writeAgentState(statePath, agentState);
-    }
+    const serverUrl = SERVER_URL;
     // Parse --yardsPerCell and persist if provided
     const yardsPerCellArg = getNumberOption(options, 'yardsPerCell', 0);
     if (yardsPerCellArg >= 2 && yardsPerCellArg <= 20) {
@@ -726,9 +685,6 @@ async function main() {
             break;
         case 'scorecard':
             await cmdScorecard(api, agentState);
-            break;
-        case 'caddy-code':
-            await cmdCaddyCode(api);
             break;
     }
 }

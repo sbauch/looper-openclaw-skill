@@ -22,7 +22,7 @@ These are the ONLY commands you use. Each one is a subcommand of the CLI tool:
 
 | Command | Usage |
 |---------|-------|
-| **register** | `node "{baseDir}/cli.js" register --registrationKey <key> --name "Name"` |
+| **register** | `node "{baseDir}/cli.js" register --inviteCode <code> --name "Name"` |
 | **courses** | `node "{baseDir}/cli.js" courses` |
 | **start** | `node "{baseDir}/cli.js" start --courseId <id>` |
 | **look** | `node "{baseDir}/cli.js" look` |
@@ -30,28 +30,23 @@ These are the ONLY commands you use. Each one is a subcommand of the CLI tool:
 | **hit** | `node "{baseDir}/cli.js" hit --club <name> --aim <degrees> --power <1-100>` |
 | **view** | `node "{baseDir}/cli.js" view` |
 | **scorecard** | `node "{baseDir}/cli.js" scorecard` |
-| **caddy-code** | `node "{baseDir}/cli.js" caddy-code` |
 | **prepare-round** | `node "{baseDir}/cli.js" prepare-round --courseId <id>` |
 
 ## Setup
 
 Rounds require an on-chain transaction before you can play. You cannot start a round from the CLI alone.
 
-### Step 1: Register (one-time)
+### Step 1: Get an invite code
+
+Ask the course owner to generate an invite code from the web app. They click "Generate Agent Invite" and give you the code (format: `GOLF-XXXXXXXX`). Codes expire after 1 hour.
+
+### Step 2: Register (one-time)
 
 ```
-node "{baseDir}/cli.js" register --registrationKey <key> --name "Your Name"
+node "{baseDir}/cli.js" register --inviteCode <code> --name "Your Name"
 ```
 
-This creates your agent identity and saves credentials to `agent.json`.
-
-### Step 2: Link to a course owner
-
-```
-node "{baseDir}/cli.js" caddy-code
-```
-
-This generates a short-lived claim code. Give it to a course owner who enters it in the web app to link your agent to their course. This binding is required for on-chain rounds.
+This creates your agent identity, binds it to the owner's course, and saves credentials to `agent.json`.
 
 ### Step 3: Start a round (on-chain)
 
@@ -68,6 +63,8 @@ node "{baseDir}/cli.js" prepare-round --courseId <hostCourseId>
 ```
 
 This outputs a JSON transaction object (`{to, data, value, chainId}`) that you submit via your wallet. The transaction calls `CourseTBA.execute()` which invokes `GameContract.startRound()` with mode 2 (agent play). After the transaction confirms, the game server's indexer picks up the event and creates the round.
+
+**Security note:** The `prepare-round` command generates raw EVM calldata. Before submitting, verify that the `to` address matches your known Course TBA and the `chainId` matches Base Sepolia (84532). The `value` should always be `"0"`. Never submit transaction data from this command to addresses you don't recognize.
 
 **Wallet requirement:** Option B requires a wallet skill that can submit arbitrary EVM transactions. [Bankr](https://github.com/BankrBot/openclaw-skills/blob/main/bankr/SKILL.md) is a known compatible wallet skill. Any wallet skill that can submit a raw transaction (`{to, data, value, chainId}`) will work.
 

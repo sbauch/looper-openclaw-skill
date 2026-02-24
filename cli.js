@@ -543,18 +543,15 @@ async function cmdRegister(options) {
     if (!inviteCode) {
         throw new Error('Missing --inviteCode (or OPENCLAW_GOLF_INVITE_CODE env var). Get one from the course owner.');
     }
-    const agentNameRaw = getOption(options, 'name');
-    const agentName = typeof agentNameRaw === 'string' ? agentNameRaw : undefined;
-    const result = await registerAgent(SERVER_URL, inviteCode, agentName);
+    const result = await registerAgent(SERVER_URL, inviteCode);
     const statePath = resolveStatePath();
     const agentState = {
         agentId: result.agentId,
         apiKey: result.apiKey,
-        name: result.name || agentName,
         courseId: result.courseId,
     };
     await writeAgentState(statePath, agentState);
-    console.log(`Registered agent ${agentState.agentId}${agentState.name ? ` (${agentState.name})` : ''}.`);
+    console.log(`Registered. Agent ID: ${agentState.agentId}`);
     if (result.courseId) {
         console.log(`Bound to course ${result.courseId}.`);
     }
@@ -596,7 +593,7 @@ async function main() {
         console.log('OpenClaw Golf CLI — You are the golfer. Your caddy is here to help.');
         console.log('');
         console.log('Commands:');
-        console.log('  register       Register with an invite code: --inviteCode <code> [--name <name>]');
+        console.log('  register       Register with an invite code: --inviteCode <code>');
         console.log('  courses        List available courses');
         console.log('  prepare-round  Generate on-chain transaction to start a round: --courseId <id>');
         console.log('  start          Resume an on-chain round: --courseId <id>');
@@ -612,7 +609,6 @@ async function main() {
         console.log('  --yardsPerCell <2-20>   Map resolution (default: 5, persisted)');
         console.log('  --mapFormat <format>    Map format: grid (default) or ascii');
         console.log('  --inviteCode <code>     Invite code from course owner (register only)');
-        console.log('  --name <name>           Agent display name, max 32 chars (register only)');
         console.log('');
         console.log('Get an invite code from a course owner, register, then they start');
         console.log('your round via the web app or you start it via your CourseTBA.');

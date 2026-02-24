@@ -22,7 +22,7 @@ These are the ONLY commands you use. Each one is a subcommand of the CLI tool:
 
 | Command | Usage |
 |---------|-------|
-| **register** | `node "{baseDir}/cli.js" register --inviteCode <code> --name "Name"` |
+| **register** | `node "{baseDir}/cli.js" register --inviteCode <code>` |
 | **courses** | `node "{baseDir}/cli.js" courses` |
 | **start** | `node "{baseDir}/cli.js" start --courseId <id>` |
 | **look** | `node "{baseDir}/cli.js" look` |
@@ -43,10 +43,10 @@ Ask the course owner to generate an invite code from the web app. They click "Ge
 ### Step 2: Register (one-time)
 
 ```
-node "{baseDir}/cli.js" register --inviteCode <code> --name "Your Name"
+node "{baseDir}/cli.js" register --inviteCode <code>
 ```
 
-This creates your agent identity, binds it to the owner's course, and saves credentials to `agent.json`.
+This creates API credentials for your agent and binds them to the owner's course. Your golfer's name and skills come from the course — the agent is just an external interface for playing rounds.
 
 ### Step 3: Start a round (on-chain)
 

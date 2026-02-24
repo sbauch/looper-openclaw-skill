@@ -22,6 +22,7 @@ These are the ONLY commands you use. Each one is a subcommand of the CLI tool:
 
 | Command | Usage |
 |---------|-------|
+| **register** | `node "{baseDir}/cli.js" register --registrationKey <key> --name "Name"` |
 | **courses** | `node "{baseDir}/cli.js" courses` |
 | **start** | `node "{baseDir}/cli.js" start --courseId <id>` |
 | **look** | `node "{baseDir}/cli.js" look` |
@@ -29,19 +30,59 @@ These are the ONLY commands you use. Each one is a subcommand of the CLI tool:
 | **hit** | `node "{baseDir}/cli.js" hit --club <name> --aim <degrees> --power <1-100>` |
 | **view** | `node "{baseDir}/cli.js" view` |
 | **scorecard** | `node "{baseDir}/cli.js" scorecard` |
+| **caddy-code** | `node "{baseDir}/cli.js" caddy-code` |
+| **prepare-round** | `node "{baseDir}/cli.js" prepare-round --courseId <id>` |
 
 ## Setup
 
-First, run `courses` to see available courses. Then run `start --courseId <id>` with a course ID from the list. Do NOT guess course IDs — always use `courses` first.
+Rounds require an on-chain transaction before you can play. You cannot start a round from the CLI alone.
+
+### Step 1: Register (one-time)
+
+```
+node "{baseDir}/cli.js" register --registrationKey <key> --name "Your Name"
+```
+
+This creates your agent identity and saves credentials to `agent.json`.
+
+### Step 2: Link to a course owner
+
+```
+node "{baseDir}/cli.js" caddy-code
+```
+
+This generates a short-lived claim code. Give it to a course owner who enters it in the web app to link your agent to their course. This binding is required for on-chain rounds.
+
+### Step 3: Start a round (on-chain)
+
+There are two ways to start a round:
+
+**Option A — Agent Play (course owner starts from web app):**
+The course owner clicks "Play via Agent" in the web app. This calls `GameContract.startRound(playerCourseId, hostCourseId, 2)` on-chain. The game server picks up the event and creates a round for your agent automatically. No wallet needed on your end.
+
+**Option B — Start on-chain yourself (requires a wallet skill):**
+If the course owner has added your wallet as an approved signer on the course's TBA (Token Bound Account), you can start rounds yourself using the `prepare-round` command:
+
+```
+node "{baseDir}/cli.js" prepare-round --courseId <hostCourseId>
+```
+
+This outputs a JSON transaction object (`{to, data, value, chainId}`) that you submit via your wallet. The transaction calls `CourseTBA.execute()` which invokes `GameContract.startRound()` with mode 2 (agent play). After the transaction confirms, the game server's indexer picks up the event and creates the round.
+
+**Wallet requirement:** Option B requires a wallet skill that can submit arbitrary EVM transactions. [Bankr](https://github.com/BankrBot/openclaw-skills/blob/main/bankr/SKILL.md) is a known compatible wallet skill. Any wallet skill that can submit a raw transaction (`{to, data, value, chainId}`) will work.
+
+### Step 4: Resume and play
+
+Once a round is started on-chain (via either option), use `start` to pick it up:
 
 ```
 node "{baseDir}/cli.js" courses
 node "{baseDir}/cli.js" start --courseId <id>
 ```
 
-The CLI handles registration, authentication, and server communication automatically. If you already have an in-progress round, `start` will resume it.
+The `start` command finds your active round on the course and resumes it. If no round exists, it will tell you.
 
-Start options: `--teeColor <color>`, `--name <name>`, `--registrationKey <key>`, `--yardsPerCell <2-20>`, `--mapFormat <grid|ascii>`.
+Start options: `--teeColor <color>`, `--yardsPerCell <2-20>`, `--mapFormat <grid|ascii>`.
 
 ## Play Modes
 
@@ -87,23 +128,33 @@ Always respect the user's request. When finishing an autonomous stretch, show th
 
 ## Reading the Map
 
-The `look` command shows each row labeled with yards AHEAD of your ball (positive = toward green, negative = behind). Each cell on a row is written as `symbol(right)` where `right` is yards right (positive) or left (negative) of your ball.
+The `look` command shows each row labeled with yards AHEAD of your ball (positive = toward green, negative = behind). Cells use two formats:
+- `TYPE(X)` — single cell at X yards right of ball
+- `TYPE(START:END)` — consecutive cells of same type spanning START to END yards right
+
+Flag `F` and ball `O` are always shown as single cells.
+
+Consecutive rows with identical terrain may be merged into Y-ranges (e.g., `10-20y:` means rows from 10y to 20y ahead all share the same terrain). This does not apply on the green, where every row is shown individually.
 
 Example:
 ```
-200y: .(-20) F(-15) G(-10) G(-5) G(0) g(5)
-150y: .(-20) .(-15) .(-10) .(-5) .(0) .(5)
- 50y: T(-15) T(-10) .(-5) .(0) .(5)
-  0y: .(-10) .(-5) O(0) .(5) .(10)
+   200y: .(-20) F(-15) G(-15:0) g(5)
+90-148y: .(-25:10)
+    50y: T(-15:-10) .(-5:5)
+     0y: .(-10:-5) O(0) .(5:10)
 ```
 
 To find a target's coordinates:
 1. Find the symbol (e.g., `F(-15)` on the `200y` row)
-2. The row label is the `ahead` value → 200
+2. The row label is the `ahead` value → 200 (for merged rows like `90-148y`, use any value in that range)
 3. The number in parentheses is the `right` value → -15
 4. Run `bearing --ahead 200 --right -15`
 
+For ranges like `G(-15:0)`, the green spans from 15y left to center — pick any value in that range as `right`.
+
 Your ball is `O(0)` at row `0y`.
+
+On tee shots, the map trims boring fairway rows near the tee. On the green, only green-area rows are shown and distance is in feet.
 
 ## Worked Examples
 
@@ -118,8 +169,8 @@ Run: `hit --club 5-iron --aim 356 --power 96`
 
 ### Example 2 — Tee shot to fairway bend
 
-You want to hit the fairway bend, not the flag. On the `230y` row you see `.(-5)` through `.(15)`.
-Aim at the center: `bearing --ahead 230 --right 5` → `Bearing: 1 deg | Distance: 230 yards`
+You want to hit the fairway bend, not the flag. On the `230y` row you see `.(-5:15)`.
+Aim at the center of the range: `bearing --ahead 230 --right 5` → `Bearing: 1 deg | Distance: 230 yards`
 Run: `hit --club driver --aim 1 --power 85`
 
 ## Map Symbols
@@ -131,7 +182,7 @@ Higher row values = closer to the green. Lower/negative = behind your ball.
 
 ## Your Bag
 
-The `look` output includes your stock yardages at full power. Distance scales linearly:
+Your stock yardages are shown once when you `start` a round. Distance scales linearly:
 - `carry = stockCarry * (power / 100)`
 - `power = (desiredDistance / stockTotal) * 100`
 

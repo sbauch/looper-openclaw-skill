@@ -126,12 +126,11 @@ class GolfApiClient {
     async listCourses() {
         return this.authorizedFetch(`${this.serverUrl}/api/courses`);
     }
-    async startRound(courseId, teeColor, yardsPerCell) {
-        return this.authorizedFetch(`${this.serverUrl}/api/course/${courseId}/rounds`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agentId: this.agentId, teeColor, ...(yardsPerCell ? { yardsPerCell } : {}) }),
-        });
+    async getOnchainConfig() {
+        return this.authorizedFetch(`${this.serverUrl}/api/agents/${this.agentId}/onchain-config`);
+    }
+    async listRounds(courseId) {
+        return this.authorizedFetch(`${this.serverUrl}/api/course/${courseId}/rounds`);
     }
     async resumeRound(courseId, roundId) {
         return this.authorizedFetch(`${this.serverUrl}/api/course/${courseId}/rounds/${roundId}/resume`, { method: 'POST' });
@@ -187,13 +186,34 @@ function normalizeClubName(name) {
         return trimmed;
     return trimmed.replace(/\s+/g, '-');
 }
+function printStockYardages(stockYardages) {
+    console.log('');
+    console.log('Your bag (stock yardages at full power):');
+    for (const club of stockYardages) {
+        console.log(`  ${club.name.padEnd(8)} ${String(club.carry).padStart(3)}y carry / ${String(club.total).padStart(3)}y total`);
+    }
+    console.log('');
+}
 function printHoleContext(holeInfo) {
     console.log('');
     // ASCII map first -- this is what the golfer "sees"
     if (holeInfo.asciiMap) {
-        console.log(holeInfo.asciiMap);
-        if (holeInfo.asciiLegend) {
-            console.log(holeInfo.asciiLegend);
+        // When on green, filter map to only green-area rows
+        if (holeInfo.ballLie === 'green') {
+            const greenChars = new Set(['G', 'g', 's', 'F', 'O']);
+            const filteredLines = holeInfo.asciiMap.split('\n').filter(line => {
+                // Keep rows that contain green-area symbols
+                return [...greenChars].some(ch => line.includes(`${ch}(`));
+            });
+            if (filteredLines.length > 0) {
+                console.log(filteredLines.join('\n'));
+            }
+            else {
+                console.log(holeInfo.asciiMap);
+            }
+        }
+        else {
+            console.log(holeInfo.asciiMap);
         }
         console.log('');
     }
@@ -207,8 +227,14 @@ function printHoleContext(holeInfo) {
         parts.push(`Stroke ${holeInfo.strokeNumber}`);
     if (holeInfo.ballLie)
         parts.push(`Lie: ${holeInfo.ballLie}`);
-    if (holeInfo.distanceToHole != null)
-        parts.push(`${holeInfo.distanceToHole.toFixed(0)}y to flag`);
+    if (holeInfo.distanceToHole != null) {
+        if (holeInfo.ballLie === 'green') {
+            parts.push(`${(holeInfo.distanceToHole * 3).toFixed(0)}ft to flag`);
+        }
+        else {
+            parts.push(`${holeInfo.distanceToHole.toFixed(0)}y to flag`);
+        }
+    }
     // directionToHole is only shown if the server includes it (controlled by config)
     if (holeInfo.directionToHole != null)
         parts.push(`Bearing: ${holeInfo.directionToHole.toFixed(0)} deg`);
@@ -223,14 +249,6 @@ function printHoleContext(holeInfo) {
         console.log('Hazards:');
         for (const hazard of holeInfo.asciiAnalysis.hazards) {
             console.log(`  ${hazard.type}: ${hazard.location}`);
-        }
-        console.log('');
-    }
-    // Stock yardages -- the golfer's bag (dynamic from agent profile)
-    if (holeInfo.stockYardages?.length) {
-        console.log('Your bag (stock yardages at full power):');
-        for (const club of holeInfo.stockYardages) {
-            console.log(`  ${club.name.padEnd(8)} ${String(club.carry).padStart(3)}y carry / ${String(club.total).padStart(3)}y total`);
         }
         console.log('');
     }
@@ -319,35 +337,51 @@ async function cmdCourses(api) {
 async function cmdStart(api, agentState, statePath, options) {
     const teeColor = getOption(options, 'teeColor') || agentState.teeColor || 'white';
     let courseId = getOption(options, 'courseId') || agentState.courseId || '';
-    let courseName = agentState.courseName || '';
     if (!courseId) {
         throw new Error('No course specified. Run the "courses" command to list available courses, then use: start --courseId <id>');
     }
-    let round;
+    // Look for an existing in-progress round on this course
+    const { rounds } = await api.listRounds(courseId);
+    const activeRound = rounds.find(r => r.status === 'in_progress');
+    if (!activeRound) {
+        throw new Error('No active round found on this course.\n\n' +
+            'Rounds must be started on-chain before you can play. Two options:\n\n' +
+            '  1. Agent Play (web app):\n' +
+            '     Run "caddy-code" to generate a claim code.\n' +
+            '     Give it to your course owner to claim you in the web app.\n' +
+            '     Owner clicks "Play via Agent" to start a round on-chain.\n' +
+            '     Then run "start --courseId <id>" again.\n\n' +
+            '  2. On-chain via TBA signer:\n' +
+            '     If your wallet is an approved signer on the course TBA,\n' +
+            '     call CourseTBA.execute() to invoke GameContract.startRound(\n' +
+            '       playerCourseId, hostCourseId, 2  // mode 2 = agent play\n' +
+            '     )\n' +
+            '     Then run "start --courseId <id>" to resume.\n');
+    }
+    // Resume the active round
+    const roundId = activeRound.id;
+    console.log(`Resuming round ${roundId}...`);
+    const resumed = await api.resumeRound(courseId, roundId);
+    const round = resumed.round;
+    console.log(`Resumed on ${agentState.courseName || courseId}. Hole ${round.currentHoleNumber}, Stroke ${round.strokeCount + 1}.`);
+    // Show handicap info if available
+    if (resumed.handicap) {
+        const hcp = resumed.handicap;
+        const hcpIdx = hcp.golferHandicapIndex.toFixed(1);
+        const courseHcp = hcp.courseHandicap != null ? String(hcp.courseHandicap) : '--';
+        console.log(`Handicap Index: ${hcpIdx} | Course Handicap: ${courseHcp}`);
+    }
+    // Fetch hole info to show stock yardages on resume
     try {
-        const roundStart = await api.startRound(courseId, teeColor, agentState.yardsPerCell);
-        round = roundStart.round;
-        console.log(`Round started on ${courseName || courseId}. Hole ${round.currentHoleNumber}, Par ${round.parForHoles[round.currentHoleNumber] ?? '?'}.`);
-    }
-    catch (error) {
-        const err = error;
-        if (err.status === 409 && err.data && typeof err.data === 'object' && 'roundId' in err.data) {
-            const roundId = String(err.data.roundId || '');
-            if (!roundId)
-                throw err;
-            console.log(`Resuming existing round ${roundId}...`);
-            const resumed = await api.resumeRound(courseId, roundId);
-            round = resumed.round;
-            console.log(`Resumed on ${courseName || courseId}. Hole ${round.currentHoleNumber}, Stroke ${round.strokeCount + 1}.`);
-        }
-        else {
-            throw err;
+        const holeInfo = await api.getHoleInfo(courseId, roundId, agentState.yardsPerCell, agentState.mapFormat || 'grid');
+        if (holeInfo.stockYardages?.length) {
+            printStockYardages(holeInfo.stockYardages);
         }
     }
+    catch { /* non-critical — yardages just won't show */ }
     // Persist round/course IDs and tee preference
     agentState.roundId = round.id;
     agentState.courseId = courseId;
-    agentState.courseName = courseName;
     agentState.teeColor = teeColor;
     await writeAgentState(statePath, agentState);
 }
@@ -442,6 +476,110 @@ async function cmdCaddyCode(api) {
     console.log('');
     console.log('Give this code to your caddy. They can enter it on the website to link their wallet to your agent.');
 }
+// ─── ABI encoding helpers (no dependencies) ──────────────────────────────
+// Hardcoded function selectors (keccak256 of signature, first 4 bytes)
+const START_ROUND_SELECTOR = '66e76b80'; // startRound(uint256,uint256,uint8)
+const EXECUTE_SELECTOR = '74420f4c'; // execute(address,uint256,bytes,uint256)
+function hexPadUint256(value) {
+    return value.toString(16).padStart(64, '0');
+}
+function hexPadAddress(addr) {
+    return addr.toLowerCase().replace('0x', '').padStart(64, '0');
+}
+/** Encode GameContract.startRound(playerCourseId, hostCourseId, mode) */
+function encodeStartRound(playerCourseId, hostCourseId, mode) {
+    return '0x' +
+        START_ROUND_SELECTOR +
+        hexPadUint256(playerCourseId) +
+        hexPadUint256(hostCourseId) +
+        hexPadUint256(BigInt(mode));
+}
+/** Encode CourseTBA.execute(to, value, data, operation) wrapping inner calldata */
+function encodeExecute(to, value, innerCalldata, operation) {
+    const dataHex = innerCalldata.replace('0x', '');
+    const dataByteLen = dataHex.length / 2;
+    // Right-pad data to 32-byte boundary
+    const paddedLen = Math.ceil(dataByteLen / 32) * 32;
+    const dataPadded = dataHex + '0'.repeat((paddedLen - dataByteLen) * 2);
+    return '0x' +
+        EXECUTE_SELECTOR +
+        hexPadAddress(to) + // word 0: to
+        hexPadUint256(value) + // word 1: value
+        hexPadUint256(128n) + // word 2: offset to data (4 head words × 32 = 128)
+        hexPadUint256(operation) + // word 3: operation
+        hexPadUint256(BigInt(dataByteLen)) + // data length
+        dataPadded; // data bytes
+}
+async function cmdPrepareRound(api, options) {
+    const hostCourseId = getOption(options, 'courseId');
+    if (!hostCourseId) {
+        throw new Error('Missing --courseId (the course you want to play on).');
+    }
+    // Fetch on-chain config from server
+    const config = await api.getOnchainConfig();
+    if (!config.tbaAddress) {
+        throw new Error('Your course does not have a TBA address yet. The course NFT must be minted first.');
+    }
+    if (!config.gameContract) {
+        throw new Error('GameContract address not available. The server may not have contract deployments configured.');
+    }
+    const playerCourseId = BigInt(config.playerCourseId);
+    const hostId = BigInt(hostCourseId);
+    const mode = 2; // agent play
+    // Encode the inner startRound calldata
+    const startRoundCalldata = encodeStartRound(playerCourseId, hostId, mode);
+    // Encode the outer execute calldata (TBA → GameContract)
+    const executeCalldata = encodeExecute(config.gameContract, 0n, startRoundCalldata, 0n);
+    console.log('');
+    console.log('On-chain transaction to start a round:');
+    console.log('');
+    console.log(`  Player Course ID: ${config.playerCourseId}`);
+    console.log(`  Host Course ID:   ${hostCourseId}`);
+    console.log(`  Mode:             2 (agent play)`);
+    console.log(`  Chain ID:         ${config.chainId}`);
+    console.log('');
+    console.log('Submit this transaction via your wallet:');
+    console.log('');
+    console.log(JSON.stringify({
+        to: config.tbaAddress,
+        data: executeCalldata,
+        value: '0',
+        chainId: config.chainId,
+    }, null, 2));
+    console.log('');
+    console.log('After the transaction confirms, run: start --courseId ' + hostCourseId);
+}
+// ─── Registration ─────────────────────────────────────────────────────────
+async function cmdRegister(options) {
+    const serverUrl = getOption(options, 'serverUrl')
+        || process.env.OPENCLAW_GOLF_SERVER_URL
+        || process.env.GAME_SERVER_URL
+        || 'https://api.playlooper.xyz';
+    const registrationKey = getOption(options, 'registrationKey')
+        || process.env.OPENCLAW_GOLF_REGISTRATION_KEY;
+    if (!registrationKey) {
+        throw new Error('Missing --registrationKey (or OPENCLAW_GOLF_REGISTRATION_KEY env var).');
+    }
+    const agentNameRaw = getOption(options, 'name');
+    const agentName = typeof agentNameRaw === 'string' ? agentNameRaw : undefined;
+    const result = await registerAgent(serverUrl, registrationKey, agentName);
+    const statePath = resolveStatePath(options);
+    const agentState = {
+        agentId: result.agentId,
+        apiKey: result.apiKey,
+        name: result.name || agentName,
+        serverUrl,
+    };
+    await writeAgentState(statePath, agentState);
+    console.log(`Registered agent ${agentState.agentId}${agentState.name ? ` (${agentState.name})` : ''}.`);
+    console.log(`Credentials saved to ${statePath}.`);
+    console.log('');
+    console.log('Next steps:');
+    console.log('  1. Run "caddy-code" to generate a claim code');
+    console.log('  2. Give the code to your course owner to link your agent in the web app');
+    console.log('  3. Owner starts a round via "Play via Agent" on-chain');
+    console.log('  4. Run "start --courseId <id>" to resume and play');
+}
 // ─── Bearing calculator (local math, no API) ─────────────────────────────
 function cmdBearing(options) {
     const aheadRaw = getOption(options, 'ahead');
@@ -474,29 +612,35 @@ async function main() {
         console.log('OpenClaw Golf CLI — You are the golfer. Your caddy is here to help.');
         console.log('');
         console.log('Commands:');
-        console.log('  courses     List available courses');
-        console.log('  start       Start or resume a round: --courseId <id>');
-        console.log('  look        See the current hole (ASCII map, yardages, hazards)');
-        console.log('  hit         Execute a shot: --club <name> --aim <deg> --power <1-100>');
-        console.log('  bearing     Calculate aim angle: --ahead <yards> --right <yards>');
-        console.log('  view        Get a PNG image URL of the current hole');
-        console.log('  scorecard   View the current round scorecard');
-        console.log('  caddy-code  Generate a code to link a caddy wallet');
+        console.log('  register       Register a new agent: --registrationKey <key> [--name <name>]');
+        console.log('  courses        List available courses');
+        console.log('  prepare-round  Generate on-chain transaction to start a round: --courseId <id>');
+        console.log('  start          Resume an on-chain round: --courseId <id>');
+        console.log('  look           See the current hole (ASCII map, yardages, hazards)');
+        console.log('  hit            Execute a shot: --club <name> --aim <deg> --power <1-100>');
+        console.log('  bearing        Calculate aim angle: --ahead <yards> --right <yards>');
+        console.log('  view           Get a PNG image URL of the current hole');
+        console.log('  scorecard      View the current round scorecard');
+        console.log('  caddy-code     Generate a code to link your agent to a course owner');
         console.log('');
         console.log('Options:');
-        console.log('  --courseId <id>         Course to play (or auto-select)');
+        console.log('  --courseId <id>         Course to play');
         console.log('  --teeColor <color>      Tee color (default: white)');
-        console.log('  --name <name>           Agent display name (max 32 chars, set at registration)');
         console.log('  --yardsPerCell <2-20>   Map resolution (default: 5, persisted)');
         console.log('  --mapFormat <format>    Map format: grid (default) or ascii');
         console.log('  --serverUrl <url>       Game server URL');
-        console.log('  --registrationKey <key> Agent registration key');
+        console.log('  --registrationKey <key> Agent registration key (register command only)');
+        console.log('  --name <name>           Agent display name, max 32 chars (register command only)');
         console.log('  --statePath <path>      Path to agent state file');
         console.log('  --agentId <id>          Agent ID override');
         console.log('  --apiKey <key>          API key override');
+        console.log('');
+        console.log('Rounds must be started on-chain. Use "caddy-code" to link to a course');
+        console.log('owner, then they start your round via the web app or you start it via');
+        console.log('your CourseTBA if your wallet is an approved signer.');
         process.exit(0);
     }
-    const validCommands = ['courses', 'start', 'look', 'hit', 'view', 'scorecard', 'bearing', 'caddy-code'];
+    const validCommands = ['register', 'courses', 'prepare-round', 'start', 'look', 'hit', 'view', 'scorecard', 'bearing', 'caddy-code'];
     if (!validCommands.includes(command)) {
         console.error(`Unknown command: ${command}. Use one of: ${validCommands.join(', ')}`);
         process.exit(1);
@@ -504,6 +648,11 @@ async function main() {
     // Bearing is pure local math — no API or credentials needed
     if (command === 'bearing') {
         cmdBearing(options);
+        return;
+    }
+    // Register is handled separately — doesn't need existing credentials
+    if (command === 'register') {
+        await cmdRegister(options);
         return;
     }
     // Resolve agent credentials — load state first so we can use saved serverUrl
@@ -526,17 +675,9 @@ async function main() {
         || agentState?.serverUrl
         || 'https://api.playlooper.xyz';
     if (!agentState) {
-        const registrationKey = getOption(options, 'registrationKey')
-            || process.env.OPENCLAW_GOLF_REGISTRATION_KEY;
-        if (!registrationKey) {
-            throw new Error('Missing registration key. Provide --registrationKey or OPENCLAW_GOLF_REGISTRATION_KEY.');
-        }
-        const agentNameRaw = getOption(options, 'name');
-        const agentName = typeof agentNameRaw === 'string' ? agentNameRaw : undefined;
-        agentState = await registerAgent(serverUrl, registrationKey, agentName);
-        agentState.serverUrl = serverUrl;
-        await writeAgentState(statePath, agentState);
-        console.log(`Registered agent ${agentState.agentId}${agentState.name ? ` (${agentState.name})` : ''}. Credentials saved to ${statePath}.`);
+        throw new Error('No agent credentials found. Register first:\n\n' +
+            '  register --registrationKey <key> --name "Agent Name"\n\n' +
+            'Or provide --agentId and --apiKey directly.');
     }
     // Persist serverUrl if explicitly provided (flag or env) and different from saved
     if (agentState.serverUrl !== serverUrl) {
@@ -567,6 +708,9 @@ async function main() {
     switch (command) {
         case 'courses':
             await cmdCourses(api);
+            break;
+        case 'prepare-round':
+            await cmdPrepareRound(api, options);
             break;
         case 'start':
             await cmdStart(api, agentState, statePath, options);
